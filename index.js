@@ -1,3 +1,10 @@
+const express = require("express");
+const app = express();
+const port = 3000;
+
+app.get("/", (req, res) => res.send("🟢 ExposedBot is running!"));
+app.listen(port, () => console.log(`🟢 Web server is live on port ${port}`));
+
 require("dotenv").config();
 const {
   Client,
