@@ -2,20 +2,30 @@
 // “Life” = All remaining prompts (dark confessions, social dares, identity questions, moral dilemmas, etc.)
 
 module.exports = [
-  // — Dark Confessions —
-  "What’s the darkest lie you’ve ever gotten away with?",
-  "Have you ever wanted to see someone you hate fail in life? Explain when.",
-  "What’s the one secret you’ve kept that would absolutely ruin your reputation?",
-  "When did you last feel proud of watching chaos unfold?",
-  "What’s a morally questionable choice you made that you’d do again?",
+  "What’s the weirdest excuse you’ve ever used to bunk a college class? And did it work?",
+  "Who was your first ever school crush—and what made you think they liked you back?",
+  "What’s one thing you used to believe as a kid that’s hilarious to you now?",
+  "What’s your go-to fake story when someone asks you why you're still single or not married yet?",
+  "Have you ever texted something cringe to someone and immediately put your phone on airplane mode? What was it?",
+ "What’s the most ‘main character’ moment you’ve ever had in public—even if nobody noticed?",
+ "Have you ever done something cringe on purpose just to impress someone? What was it and did it work?",
+ "What’s the funniest or most ridiculous rumor you’ve heard about yourself in college or school?",
+ "What’s one thing you used to brag about in school/college that was 100% made up?",
+ "Have you ever given someone relationship advice that you completely ignored in your own life? What was it?",
+"What’s your most legendary “missed the chance to flirt” moment that still haunts you today?",
+"Have you ever secretly recorded your friends doing something funny just to blackmail them later? What was it?",
+"If you had to choose one person in this group to improve their personality or style, who would it be — and what needs to change?",
+"Have you ever sabotaged your own relationship or friendship on purpose? Why?",
+"What’s one toxic trait you hide from everyone but know you have?",
+"Tell one player here what they need to fix about themselves to actually be attractive.",
+"What’s something you already regret not doing—because you know once you’re older, it’ll be too late?",
+"What’s the cringiest or most embarrassing thing you fear doing in a relationship?",
+"If someone you’ve secretly adored suddenly confessed they like you—what would your honest, unfiltered reaction be?Freak out? Ghost? Melt? Kiss?",
 
-  // — Social Dares —
-  "What’s the naughtiest thing you’ve done in public and not gotten caught?",
+
+  //social 
   "If you could break any law right now and not get caught, what would you do?",
-  "Share a time you publicly embarrassed yourself just to fit in.",
-  "What’s the most rebellious thing you’ve done to spite someone’s expectations?",
-  "What’s the worst rumor you spread or believed about someone else?",
-
+  
   // — Identity / “What-If” —
   "If you could become any fictional villain for a day, who would you be and why?",
   "What part of yourself do you hide from everyone because you’re ashamed of it?",
