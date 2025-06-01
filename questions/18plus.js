@@ -2,8 +2,6 @@
 // “18+” = Steamy/risqué prompts (adult but not fully extreme/taboo)
 
 module.exports = [
-  
-  
   "Describe the kink you’re too shy to admit to your friends.",
   "What's the dirtiest sext you've ever sent or received? Recite it word-for-word.",
   "What’s a guilty-pleasure fantasy you’ve never told anyone?",
@@ -18,8 +16,29 @@ module.exports = [
   "What turns you on more — personality dominance or physical seduction? Who in the people you know has that ?",
   "Describe your most intense romantic dream. Was it someone real or made up?",
   "Pick a player and create a sexual rumor about them — on the spot.",
-
-  
-  
-
+  "What’s one thing your partner did that broke your trust—but secretly turned you on?",
+  "What’s the dirtiest thing you’ve ever wanted someone to do to you—but never said aloud?",
+  "What’s a red flag that turns you on more than it should?",
+  "What’s the dirtiest thing you've ever wanted someone to do to you—but were too shy to ask?",
+  " Have you ever secretly touched yourself thinking about someone ",
+  "Have you ever fantasized about someone completely off-limits—like a friend’s ex, cousin’s partner, or a teacher?",
+  "Have you ever crossed a boundary just to feel wanted by someone?",
+  "If you could sleep with anyone from your friend group with zero consequences—who would it be?",
+  "Describe the dirtiest dream you’ve ever had. Who was in it?",
+  "Describe the dirtiest dream you’ve ever had. Who was in it?",
+  "In your dream scenario, would you be more dominant or submissive?",
+  "Have you ever practiced kissing on your hand, pillow, or mirror? Be honest.",
+  "If someone confessed their feelings to you right now, how would you actually respond?",
+  "Have you ever pretended to have had your “first time” just to fit in? What was the lie?",
+  "If you had to choose between a sweet first kiss, a magical date, or a wild one-night stand—which would you pick?",
+  "If you had to fake being in a relationship, who would you pick as your partner here?",
+  "What turns you on more—romantic cuddles or playful teasing",
+  "What’s something your ex would say about you that’s completely true?",
+  "Would you ever hook up with an ex if you knew no one would find out?",
+  "What’s the dumbest reason you’ve ever caught feelings for someone?",
+  "Are you truly over your last situationship—or is something still left inside?",
+  "Have you ever stalked your ex’s new partner and compared yourself to them?",
+  "Do you crave love, lust, or peace more right now? Be honest.",
+  "If you could erase the memory of one person—would you? Why?",
+  "What hurts more: being ghosted or realizing they never actually cared about you?",
 ];

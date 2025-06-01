@@ -21,10 +21,37 @@ module.exports = [
 "What’s something you already regret not doing—because you know once you’re older, it’ll be too late?",
 "What’s the cringiest or most embarrassing thing you fear doing in a relationship?",
 "If someone you’ve secretly adored suddenly confessed they like you—what would your honest, unfiltered reaction be?Freak out? Ghost? Melt? Kiss?",
+"Have you ever been betrayed by someone close—and still can’t forgive them?",
+"If you could do anything illegal or taboo in public—with zero consequences—what would you do?",
+"What’s one incident from college you wish had never happened?",
+"You meet your true love, but they have a physical past—do you fully accept it, or does it burn inside?",
+"Have you ever used intimacy to fill a void—even though you weren’t emotionally into them?",
+"Who hurt you the most, but you still lingers in your  mind at 2 a.m.?",
+"What are your real intentions—with your girlfriend... and with your future wife? (be honest)",
+"Have you ever acted like you don't have feelings for someone while silently melting for them inside ? ",
+"What’s the most ridiculous or bold thing you’ve done just to get your crush’s attention?",
+"Which movie-like romantic scene do you secretly want to recreate—and with whom?",
+"If your parents gave you one wish and promised they wouldn’t say no—what would you ask for?",
+"If you could be loved—physically or emotionally—by anyone, who would you choose without hesitation?",  "If you could break any law right now and not get caught, what would you do?",
+"What's something toxic your heart still craves no matter how badly it hurt you?",
+"What’s a truth you never told your ex because it would’ve shattered them?",
+"Have you ever ghosted someone who didn’t deserve it? Why did you do it?",
+"What’s something your younger self would be disappointed in you for doing—or not doing?",
+"What’s one lie you keep telling people to protect your image?",
+"Do you have red flags you hide on purpose in relationships?",
+"What’s your secret emotional weakness in love or relationships?",
+"What’s the closest you’ve ever come to falling in love?",
+"Have you ever caught feelings for someone who had no idea? What happened?",
+"Do you secretly crave love—or are you fully into solo life?",
+"Who in this room would you fake-date just to make your ex jealous?",
+"What’s your biggest insecurity about never being in a relationship?",
 
 
-  //social 
-  "If you could break any law right now and not get caught, what would you do?",
+
+
+
+
+
   
   // — Identity / “What-If” —
   "If you could become any fictional villain for a day, who would you be and why?",
