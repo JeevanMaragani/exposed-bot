@@ -34,15 +34,24 @@ const client = new Client({
   ],
 });
 
-// ─── In‐Memory State ─────────────────────────────────────────
+// ─── In-Memory State ──────────────────────────────────────────
 // gameState[guildId] = {
-//   step: string,          // "awaiting_player_count" | "awaiting_player_names" | "choose_category" | "playing" | "awaiting_continue"
+//   step: string,               // "awaiting_player_count" | "awaiting_player_names" |
+//                              // "warning" | "rules" | "choose_category" |
+//                              // "playing" | "awaiting_continue"
+//   hostId: string,             // Discord ID of who ran /startgame
 //   playerCount: number,
-//   players: [string],     // list of player names
-//   category: string,      // "extreme_18" | "18plus" | "life"
-//   questionLog: { [playerName]: { category: string, question: string }[] },
+//   playerIds: string[],        // Array of Discord IDs of participants
+//   playerAliases: { [id]: string }, // Map ID → alias string
+//   players: string[],          // Array of alias strings (same order as playerIds)
+//   readyPlayers: Set<string>,  // IDs who clicked “I’M READY”
+//   startPlayers: Set<string>,  // IDs who clicked “START GAME”
+//   exitedWarning: Set<string>, // IDs who clicked “EXIT” at warning stage
+//   exitedRules: Set<string>,   // IDs who clicked “EXIT” at rules stage
+//   category: string,           // “extreme_18” | “18plus” | “life”
+//   questionLog: { [alias]: { category: string, question: string }[] },
 //   lastRound: { playerName: string, question: string } | null,
-//   lastPlayer: string | null // previously picked player (to avoid immediate repeats)
+//   lastPlayer: string | null   // previously picked alias
 // }
 const gameState = {};
 
@@ -94,6 +103,42 @@ function getNextQuestion(guildId, playerName, category) {
 }
 
 /**
+ * Builds the “I’M READY 🔥” button.
+ */
+function createReadyButton() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("im_ready")
+      .setLabel("I’M READY 🔥")
+      .setStyle(ButtonStyle.Danger)
+  );
+}
+
+/**
+ * Builds a generic “EXIT ❌” button with the given customId.
+ */
+function createExitButton(customId) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(customId)
+      .setLabel("EXIT ❌")
+      .setStyle(ButtonStyle.Secondary)
+  );
+}
+
+/**
+ * Builds the “START GAME ▶️” button.
+ */
+function createStartGameButton() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("start_game")
+      .setLabel("START GAME ▶️")
+      .setStyle(ButtonStyle.Primary)
+  );
+}
+
+/**
  * Builds category selection buttons.
  */
 function createCategoryButtons() {
@@ -114,7 +159,7 @@ function createCategoryButtons() {
 }
 
 /**
- * Builds a single Continue button (used after a dare is shown).
+ * Builds a single “Continue” button (used after a dare is shown).
  */
 function createContinueButton() {
   return new ActionRowBuilder().addComponents(
@@ -126,7 +171,7 @@ function createContinueButton() {
 }
 
 /**
- * Builds Next/Skip buttons for the ongoing round.
+ * Builds the Next/Skip buttons for the ongoing round.
  */
 function createNextSkipButtons() {
   return new ActionRowBuilder().addComponents(
@@ -146,10 +191,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
   const guildId = interaction.guild.id;
   const state = gameState[guildId];
 
-  // ─── NEW “NO-STATE” BUTTON GUARD ────────────────────────────
-  // If someone clicks a game button (#1) after typing "end" or (#2) before any /startgame, we give a polite reply.
+  // ─── 0) NO-STATE & OUT-OF-TURN GUARD ─────────────────────────
+  //
+  // If someone clicks *any* of our custom buttons before the bot
+  // is in the appropriate state, we return a polite ephemeral reply
+  //
   if (interaction.isButton()) {
-    const validCustomIds = [
+    const allButtonIds = [
+      "im_ready",
+      "exit_warning",
+      "start_game",
+      "exit_rules",
       "extreme_18",
       "18plus",
       "life",
@@ -157,48 +209,344 @@ client.on(Events.InteractionCreate, async (interaction) => {
       "skip_question",
       "continue_game",
     ];
-    if (validCustomIds.includes(interaction.customId) && !state) {
+
+    // If it’s *one of ours* but we don’t have state at all:
+    if (allButtonIds.includes(interaction.customId) && !state) {
       return interaction.reply({
         content:
           "❌ There is no active game currently. Start a new game with `/startgame`.",
         ephemeral: true,
       });
     }
+
+    // If it’s “START GAME” but we’re not in the rules stage:
+    if (
+      interaction.customId === "start_game" &&
+      (!state || state.step !== "rules")
+    ) {
+      return interaction.reply({
+        content: "⏳ Please wait until all players reach the Rules stage.",
+        ephemeral: true,
+      });
+    }
+
+    // If it’s “I’M READY” or “EXIT ❌ (warning)” but we’re not in warning stage:
+    if (
+      (interaction.customId === "im_ready" ||
+        interaction.customId === "exit_warning") &&
+      (!state || state.step !== "warning")
+    ) {
+      return interaction.reply({
+        content: "⏳ Please wait until the Warning stage is shown.",
+        ephemeral: true,
+      });
+    }
+
+    // If it’s “EXIT ❌ (rules)” but we’re not in rules stage:
+    if (
+      interaction.customId === "exit_rules" &&
+      (!state || state.step !== "rules")
+    ) {
+      return interaction.reply({
+        content: "⏳ Please wait until the Rules stage is shown.",
+        ephemeral: true,
+      });
+    }
+
+    // If it’s a category button but we’re not choosing category:
+    if (
+      ["extreme_18", "18plus", "life"].includes(interaction.customId) &&
+      (!state || state.step !== "choose_category")
+    ) {
+      return interaction.reply({
+        content: "⏳ Please wait until category selection is open.",
+        ephemeral: true,
+      });
+    }
+
+    // If it’s Next/Skip/Continue but we’re not in “playing” or “awaiting_continue”:
+    if (
+      ["next_question", "skip_question"].includes(interaction.customId) &&
+      (!state || state.step !== "playing")
+    ) {
+      return interaction.reply({
+        content: "⏳ Please wait until the game is in progress.",
+        ephemeral: true,
+      });
+    }
+    if (
+      interaction.customId === "continue_game" &&
+      (!state || state.step !== "awaiting_continue")
+    ) {
+      return interaction.reply({
+        content: "⏳ Please wait until your dare is shown.",
+        ephemeral: true,
+      });
+    }
   }
-  // ─── “NO-STATE” GUARD END ───────────────────────────────────
+  // ─── NO-STATE & OUT-OF-TURN GUARD END ───────────────────────
 
   // ─── 1) Slash Command “/startgame” ─────────────────────────
   if (interaction.isChatInputCommand()) {
     if (interaction.commandName === "startgame") {
-      // Initialize or reset the state for this guild
+      // Initialize (or reset) the state for this guild
       gameState[guildId] = {
         step: "awaiting_player_count",
-        players: [],
+        hostId: interaction.user.id,
         playerCount: 0,
+        playerIds: [],
+        playerAliases: {},
+        players: [],
+        readyPlayers: new Set(),
+        startPlayers: new Set(),
+        exitedWarning: new Set(),
+        exitedRules: new Set(),
         category: null,
         questionLog: {},
         lastRound: null,
         lastPlayer: null,
       };
 
-      // Embed: “How many players?”
-      const embed = new EmbedBuilder()
+      // Ask for number of players
+      const countEmbed = new EmbedBuilder()
         .setColor(EMBED_COLOR)
         .setTitle("🎮 Exposed: Battle of Minds")
-        .setDescription("How many players are joining? (Enter a number 2–10)");
+        .setDescription("Please enter the number of players (2–10).");
 
-      await interaction.reply({ embeds: [embed] });
+      await interaction.reply({ embeds: [countEmbed] });
       return;
     }
   }
 
-  // ─── 2) Category Selection button (only valid if state.step === "choose_category") ─────────────────────────
+  // ─── 2) “I’M READY 🔥” or “EXIT ❌” Buttons (Warning stage) ─────────────────────────
+  if (
+    interaction.isButton() &&
+    state &&
+    state.step === "warning" &&
+    (interaction.customId === "im_ready" ||
+      interaction.customId === "exit_warning")
+  ) {
+    const userId = interaction.user.id;
+
+    // If user is not in the mention list, ignore
+    if (!state.playerIds.includes(userId)) {
+      return interaction.reply({
+        content: "❌ You are not a listed player for this game.",
+        ephemeral: true,
+      });
+    }
+
+    // If they clicked “I’M READY”
+    if (interaction.customId === "im_ready") {
+      if (!state.readyPlayers.has(userId)) {
+        state.readyPlayers.add(userId);
+      }
+      // If they had previously exited, remove that
+      state.exitedWarning.delete(userId);
+    }
+
+    // If they clicked “EXIT” at warning
+    if (interaction.customId === "exit_warning") {
+      if (!state.exitedWarning.has(userId)) {
+        state.exitedWarning.add(userId);
+      }
+      // Remove from readyPlayers if present
+      state.readyPlayers.delete(userId);
+    }
+
+    // Build lists of aliases for display
+    const readyAliases = Array.from(state.readyPlayers).map(
+      (id) => state.playerAliases[id]
+    );
+    const exitedAliases = Array.from(state.exitedWarning).map(
+      (id) => state.playerAliases[id]
+    );
+
+    // Construct the Warning embed showing who clicked what
+    const mentionList = state.playerIds.map((id) => `<@${id}>`).join(", ");
+    let warningDesc =
+      `These are your players: ${mentionList}\n\n` +
+      "⚠️ **WARNING**\n" +
+      "This game is not for the weak-hearted.\n" +
+      "It will test your courage, vulnerability, and honesty.\n" +
+      "If you're afraid to face your own truth—**do not play**.\n\n" +
+      "This is your chance to be real. To drop the mask. To expose yourself.\n\n";
+    if (readyAliases.length > 0) {
+      warningDesc += `✅ Ready: ${readyAliases.join(", ")}\n`;
+    }
+    if (exitedAliases.length > 0) {
+      warningDesc += `❌ Exited: ${exitedAliases.join(", ")}\n`;
+    }
+    warningDesc +=
+      "\n➤ Click **“I’M READY 🔥”** to stay, or **“EXIT ❌”** to quit.";
+
+    const warningEmbed = new EmbedBuilder()
+      .setColor(EMBED_COLOR)
+      .setTitle("⚠️ WARNING")
+      .setDescription(warningDesc);
+
+    // Check if all have made a choice
+    const totalChoices = state.readyPlayers.size + state.exitedWarning.size;
+    if (totalChoices === state.playerIds.length) {
+      // Filter out any who exited
+      state.playerIds = state.playerIds.filter(
+        (id) => !state.exitedWarning.has(id)
+      );
+      state.players = state.playerIds.map((id) => state.playerAliases[id]);
+
+      // If fewer than 2 remain, cancel game
+      if (state.players.length < 2) {
+        delete gameState[guildId];
+        return interaction.update({
+          content: "❌ Not enough players remain. Game canceled.",
+          embeds: [],
+          components: [],
+        });
+      }
+
+      // Move to rules stage
+      state.step = "rules";
+
+      const playersMention = state.playerIds.map((id) => `<@${id}>`).join(", ");
+      const rulesEmbed = new EmbedBuilder()
+        .setColor(EMBED_COLOR)
+        .setTitle("✅ All set.")
+        .setDescription(
+          `These are your players: ${playersMention}\n\n` +
+            "⚔️ **Rules of the Game:**\n" +
+            "1. “Answer honestly or skip and face the dare.”\n" +
+            "2. “No judgment. No filters. No pretending.”\n" +
+            "3. “If you lie—you lose.”\n\n" +
+            'When you\'re ready... click **"START GAME ▶️"** to begin the first question, or **“EXIT ❌”** to quit.'
+        );
+
+      return interaction.update({
+        embeds: [rulesEmbed],
+        components: [createStartGameButton(), createExitButton("exit_rules")],
+      });
+    }
+
+    // Otherwise, just update the warning embed
+    return interaction.update({
+      embeds: [warningEmbed],
+      components: [createReadyButton(), createExitButton("exit_warning")],
+    });
+  }
+
+  // ─── 3) “START GAME ▶️” Button during rules stage ─────────────────────────
+  if (
+    interaction.isButton() &&
+    state &&
+    state.step === "rules" &&
+    interaction.customId === "start_game"
+  ) {
+    const userId = interaction.user.id;
+
+    // If user is not in the “remaining players” list, ignore
+    if (!state.playerIds.includes(userId)) {
+      return interaction.reply({
+        content: "❌ You are not a listed player for this game.",
+        ephemeral: true,
+      });
+    }
+
+    // Mark as “wants to start”
+    if (!state.startPlayers.has(userId)) {
+      state.startPlayers.add(userId);
+    }
+    // If they had clicked exit at rules, remove that
+    state.exitedRules.delete(userId);
+
+    // Build lists of aliases for display
+    const clickedAliases = Array.from(state.startPlayers).map(
+      (id) => state.playerAliases[id]
+    );
+    const exitedAliases = Array.from(state.exitedRules).map(
+      (id) => state.playerAliases[id]
+    );
+    const waitingIds = state.playerIds.filter(
+      (id) => !state.startPlayers.has(id) && !state.exitedRules.has(id)
+    );
+    const waitingAliases = waitingIds.map((id) => state.playerAliases[id]);
+
+    let rulesDesc =
+      `These are your players: ${state.playerIds
+        .map((id) => `<@${id}>`)
+        .join(", ")}\n\n` +
+      "⚔️ **Rules of the Game:**\n" +
+      "1. “Answer honestly or skip and face the dare.”\n" +
+      "2. “No judgment. No filters. No pretending.”\n" +
+      "3. “If you lie—you lose.”\n\n";
+    if (clickedAliases.length > 0) {
+      rulesDesc += `✅ ${clickedAliases.join(", ")} clicked START GAME\n`;
+    }
+    if (exitedAliases.length > 0) {
+      rulesDesc += `❌ ${exitedAliases.join(", ")} clicked EXIT\n`;
+    }
+    if (waitingAliases.length > 0) {
+      rulesDesc += `⏳ Waiting for: ${waitingAliases.join(", ")}\n`;
+    } else {
+      rulesDesc += `✅ All players clicked START GAME\n`;
+    }
+    rulesDesc +=
+      "\nBy clicking **“START GAME ▶️”**, you accept these rules and agree to play.";
+
+    const rulesEmbedUpdate = new EmbedBuilder()
+      .setColor(EMBED_COLOR)
+      .setTitle("✅ Rules of the Game")
+      .setDescription(rulesDesc);
+
+    // Check if everyone has chosen at rules
+    const totalRulesChoices = state.startPlayers.size + state.exitedRules.size;
+    if (totalRulesChoices === state.playerIds.length) {
+      // Filter out any who exited at rules
+      state.playerIds = state.playerIds.filter(
+        (id) => !state.exitedRules.has(id)
+      );
+      state.players = state.playerIds.map((id) => state.playerAliases[id]);
+
+      // If fewer than 2 remain, cancel game
+      if (state.players.length < 2) {
+        delete gameState[guildId];
+        return interaction.update({
+          content: "❌ Not enough players remain. Game canceled.",
+          embeds: [],
+          components: [],
+        });
+      }
+
+      // Move to category selection
+      state.step = "choose_category";
+
+      const categoryEmbed = new EmbedBuilder()
+        .setColor(EMBED_COLOR)
+        .setTitle("✅ PLAYERS REGISTERED")
+        .setDescription(
+          `Players: ${state.players.join(
+            ", "
+          )}\n\nNow pick a category to begin:`
+        );
+
+      return interaction.update({
+        embeds: [categoryEmbed],
+        components: [createCategoryButtons()],
+      });
+    }
+
+    // Otherwise, just update the rules embed
+    return interaction.update({
+      embeds: [rulesEmbedUpdate],
+      components: [createStartGameButton(), createExitButton("exit_rules")],
+    });
+  }
+
+  // ─── 4) Category Selection button (only valid if state.step === "choose_category") ─────────────────────────
   if (interaction.isButton() && state && state.step === "choose_category") {
     const selectedCategory = interaction.customId; // "extreme_18", "18plus", or "life"
     state.category = selectedCategory;
     state.step = "playing";
 
-    // Pick a random player (avoid repeats)
+    // Pick a random alias (avoid immediate repeats)
     const chosenPlayer = pickRandomPlayer(guildId, state.players);
     state.lastPlayer = chosenPlayer;
 
@@ -219,7 +567,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     saveAnsweredQuestion(guildId, chosenPlayer, selectedCategory, question);
     state.lastRound = { playerName: chosenPlayer, question: question };
 
-    // Build a BIGGER EMBED: player name is the title; question is in a field:
+    // Build the question embed: alias is the title
     const questionEmbed = new EmbedBuilder()
       .setColor(EMBED_COLOR)
       .setTitle(`🎲 ${chosenPlayer.toUpperCase()}'S TURN`)
@@ -239,7 +587,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     return;
   }
 
-  // ─── 3) “Next Question” button click (player answered last one) ─────────────────────────
+  // ─── 5) “Next Question” button click (player answered last one) ─────────────────────────
   if (
     interaction.isButton() &&
     state &&
@@ -286,7 +634,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     return;
   }
 
-  // ─── 4) “Skip & Get Dare” button click ─────────────────────────
+  // ─── 6) “Skip & Get Dare” button click ─────────────────────────
   if (
     interaction.isButton() &&
     state &&
@@ -308,7 +656,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     // Move state into “awaiting_continue” so we wait for a Continue click
     state.step = "awaiting_continue";
 
-    // Embed: “You skipped—here’s your dare”
+    // Build the dare embed
     const dareEmbed = new EmbedBuilder()
       .setColor(EMBED_COLOR)
       .setTitle("⏭️ YOU SKIPPED!")
@@ -328,7 +676,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     return;
   }
 
-  // ─── 5) “Continue” button click (after a dare) → ask next question ─────────────────────────
+  // ─── 7) “Continue” button click (after a dare) → ask next question ─────────────────────────
   if (
     interaction.isButton() &&
     state &&
@@ -337,7 +685,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
   ) {
     const selectedCategory = state.category;
 
-    // Pick the next player & next question
+    // Pick the next alias & next question
     const chosenPlayer = pickRandomPlayer(guildId, state.players);
     state.lastPlayer = chosenPlayer;
 
@@ -383,51 +731,29 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 });
 
-// ─── Single MessageCreate Handler (with “end” keyword) ─────────────────────────
+// ─── Single MessageCreate Handler (with “end” and mention+alias parsing) ─────────────────────────
 client.on(Events.MessageCreate, async (msg) => {
   // 1. Ignore bots
   if (msg.author.bot) return;
 
   const guildId = msg.guild?.id;
   const state = gameState[guildId];
+  const content = msg.content.trim();
 
   // 1.a) If user types "end", terminate the game session in this guild
-  if (msg.content.trim().toLowerCase() === "end") {
+  if (content.toLowerCase() === "end") {
     if (!state) {
-      // No active game to end
       return msg.channel.send(
         "❌ No active game session to end in this channel."
       );
     }
-    // Delete the in-memory state for this guild
     delete gameState[guildId];
     return msg.channel.send(
       "🛑 The game session has been ended. Thanks for playing!"
     );
   }
 
-  // 2. “changecategory” keyword—only valid if we’re in “playing”:
-  if (
-    msg.content.trim().toLowerCase() === "changecategory" &&
-    state &&
-    state.step === "playing"
-  ) {
-    state.step = "choose_category";
-
-    const embed = new EmbedBuilder()
-      .setColor(EMBED_COLOR)
-      .setTitle("🔄 CHANGE CATEGORY")
-      .setDescription("You requested a new category! Please pick one below:");
-
-    return msg.channel.send({
-      embeds: [embed],
-      components: [createCategoryButtons()],
-    });
-  }
-
-  const content = msg.content.trim();
-
-  // 3. STEP 1: Awaiting player count (only if state.step === "awaiting_player_count")
+  // 2. Awaiting player count
   if (state && state.step === "awaiting_player_count") {
     const count = parseInt(content);
     if (isNaN(count) || count < 2 || count > 10) {
@@ -438,44 +764,98 @@ client.on(Events.MessageCreate, async (msg) => {
     state.playerCount = count;
     state.step = "awaiting_player_names";
 
-    const embed = new EmbedBuilder()
-      .setColor(EMBED_COLOR)
-      .setTitle("✅ PLAYERS COUNT SET")
-      .setDescription(
-        `You entered **${count}** players.\n\nNow, please enter all player names at once, separated by commas.\nExample: \`Alice,Bob,Charlie\`.`
-      );
-
-    return msg.channel.send({ embeds: [embed] });
+    return msg.channel.send({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(EMBED_COLOR)
+          .setTitle("✅ PLAYERS COUNT SET")
+          .setDescription(
+            `You entered **${count}** players.\n\n` +
+              "Now, please @mention each player **and** their alias, using `as`.\n" +
+              "Example: `@david696 as Jeevan, @alice123 as Priya, @bob789 as Rohit`"
+          ),
+      ],
+    });
   }
 
-  // 4. STEP 2: Awaiting comma-separated player names
+  // 3. Awaiting mention+alias list
   if (state && state.step === "awaiting_player_names") {
-    const names = content
-      .split(",")
-      .map((n) => n.trim())
-      .filter((n) => n);
-    if (names.length !== state.playerCount) {
+    // Expect format: <@id> as Alias, <@id2> as Alias2, ...
+    const parts = content.split(",").map((p) => p.trim());
+    if (parts.length !== state.playerCount) {
       return msg.channel.send({
-        content: `❌ You specified ${state.playerCount} players. Please enter exactly ${state.playerCount} names, separated by commas.`,
+        content: `❌ You said there would be ${state.playerCount} players, but I see ${parts.length} entries. Please @mention exactly ${state.playerCount} users with aliases.`,
       });
     }
-    for (const name of names) {
-      if (name.length < 2 || name.length > 20) {
-        return msg.channel.send({
-          content:
-            "❌ Each name must be 2–20 characters long. Try again, comma-separated.",
-        });
+
+    const tempIds = [];
+    const tempAliases = {};
+    let parseError = false;
+
+    for (const part of parts) {
+      // Regex to capture mention and alias: <@!?\d+> as Alias
+      const match = part.match(/^<@!?(\d+)> as (.+)$/);
+      if (!match) {
+        parseError = true;
+        break;
       }
+      const userId = match[1];
+      const alias = match[2].trim();
+      if (alias.length < 1 || alias.length > 20) {
+        parseError = true;
+        break;
+      }
+      tempIds.push(userId);
+      tempAliases[userId] = alias;
     }
-    state.players = names;
+
+    if (parseError) {
+      return msg.channel.send({
+        content:
+          "❌ Invalid format. Make sure you use `@mention as Alias`, separated by commas. Example:\n" +
+          "`@david696 as Jeevan, @alice123 as Priya, @bob789 as Rohit`",
+      });
+    }
+
+    // All good: store in state
+    state.playerIds = tempIds;
+    state.playerAliases = tempAliases;
+    state.players = tempIds.map((id) => tempAliases[id]);
+    state.step = "warning";
+
+    // Build and send the Warning embed
+    const mentionList = state.playerIds.map((id) => `<@${id}>`).join(", ");
+    const warningEmbed = new EmbedBuilder()
+      .setColor(EMBED_COLOR)
+      .setTitle("⚠️ WARNING")
+      .setDescription(
+        `These are your players: ${mentionList}\n\n` +
+          "⚠️ **WARNING**\n" +
+          "This game is not for the weak-hearted.\n" +
+          "It will test your courage, vulnerability, and honesty.\n" +
+          "If you're afraid to face your own truth—**do not play**.\n\n" +
+          "This is your chance to be real. To drop the mask. To expose yourself.\n\n" +
+          "➤ Click **“I’M READY 🔥”** to stay, or **“EXIT ❌”** to quit."
+      );
+
+    return msg.channel.send({
+      embeds: [warningEmbed],
+      components: [createReadyButton(), createExitButton("exit_warning")],
+    });
+  }
+
+  // 4. “changecategory” keyword—only valid if state.step === “playing”
+  if (
+    content.toLowerCase() === "changecategory" &&
+    state &&
+    state.step === "playing"
+  ) {
     state.step = "choose_category";
 
     const embed = new EmbedBuilder()
       .setColor(EMBED_COLOR)
-      .setTitle("✅ PLAYERS REGISTERED")
-      .setDescription(
-        `Players: ${names.join(", ")}\n\nNow pick a category to begin:`
-      );
+      .setTitle("🔄 CHANGE CATEGORY")
+      .setDescription("You requested a new category! Please pick one below:");
 
     return msg.channel.send({
       embeds: [embed],
