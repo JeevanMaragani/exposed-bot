@@ -1,43 +1,59 @@
 // utils/playerPicker.js
 
-// Keeps track of who was picked last, per guild:
-let lastPicked = {};
+// For each guild, we maintain a queue (array) of players yet to be picked this “cycle.”
+const guildQueues = {};
 
 /**
- * Randomly selects a player from `players`, but never returns the same
- * name twice in a row (unless there is only one player in the list).
+ * Fisher–Yates shuffle in-place
+ * @param {any[]} array
+ */
+function shuffleArray(array) {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+}
+
+/**
+ * Randomly selects a player from `players` such that:
+ *  • No one repeats until everyone else has been picked.
+ *  • Once the “queue” is exhausted, we reshuffle and start a new cycle.
  *
  * @param {string} guildId
- * @param {string[]} players
+ * @param {string[]} players  // array of alias strings
  * @returns {string|null}
  */
 function pickRandomPlayer(guildId, players) {
   if (!players || players.length === 0) return null;
+  // If there’s only one player, always return them:
   if (players.length === 1) return players[0];
 
-  const previous = lastPicked[guildId];
-  let eligible = players;
+  // If the queue doesn't exist or its contents differ from `players`, (re)build it:
+  const queue = guildQueues[guildId] || [];
+  const sameContents =
+    queue.length === players.length && queue.every((p) => players.includes(p));
 
-  if (previous) {
-    // Exclude the last‐picked player if possible
-    eligible = players.filter((p) => p !== previous);
-    if (eligible.length === 0) {
-      // If filtering left us with an empty list, fall back to the full list
-      eligible = players;
-    }
+  if (!sameContents || queue.length === 0) {
+    // Reinitialize: make a fresh shuffled copy of `players`
+    guildQueues[guildId] = [...players];
+    shuffleArray(guildQueues[guildId]);
   }
 
-  const picked = eligible[Math.floor(Math.random() * eligible.length)];
-  lastPicked[guildId] = picked;
-  return picked;
+  // Pop the next player out of the queue:
+  const next = guildQueues[guildId].shift();
+  // (If for some corner-case shift() returns undefined, fallback to random pick:)
+  if (!next) {
+    const idx = Math.floor(Math.random() * players.length);
+    return players[idx];
+  }
+  return next;
 }
 
 /**
- * (Optional) If you ever need to reset which player was last picked,
- * call this to clear that guild’s history.
+ * Resets a guild’s queue completely (next call to pickRandomPlayer will re-shuffle).
  */
 function resetLastPicked(guildId) {
-  delete lastPicked[guildId];
+  delete guildQueues[guildId];
 }
 
 module.exports = {

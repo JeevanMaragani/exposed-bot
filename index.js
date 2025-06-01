@@ -9,8 +9,8 @@ const {
   EmbedBuilder,
 } = require("discord.js");
 
-// Helper that picks a random player without immediate repeats:
-const { pickRandomPlayer } = require("./utils/playerPicker");
+// Helper that picks a random player in a fully shuffled cycle:
+const { pickRandomPlayer, resetLastPicked } = require("./utils/playerPicker");
 
 // ─── Import Category Questions ───────────────────────────────
 const extreme_18 = require("./questions/extreme_18");
@@ -40,22 +40,21 @@ const client = new Client({
 
 // ─── In-Memory State ──────────────────────────────────────────
 // gameState[guildId] = {
-//   step: string,               // "awaiting_player_count" | "awaiting_player_names" |
-//                              // "choose_category" | "warning" | "rules" |
-//                              // "playing" | "awaiting_continue"
-//   hostId: string,             // Discord ID of who ran /startgame
+//   step: string,
+//   hostId: string,
 //   playerCount: number,
-//   playerIds: string[],        // Discord IDs of participants
-//   playerAliases: { [id]: string }, // Map ID → alias string
-//   players: string[],          // Array of alias strings (same order as playerIds)
-//   readyPlayers: Set<string>,  // IDs who clicked “I’M READY” at warning
-//   startPlayers: Set<string>,  // IDs who clicked “START GAME” at rules
-//   exitedWarning: Set<string>, // IDs who clicked “EXIT” at warning stage
-//   exitedRules: Set<string>,   // IDs who clicked “EXIT” at rules stage
-//   category: string,           // “extreme_18” | “18plus” | “life” | “mix”
+//   playerIds: string[],
+//   playerAliases: { [id]: string },
+//   players: string[],
+//   readyPlayers: Set<string>,
+//   startPlayers: Set<string>,
+//   exitedWarning: Set<string>,
+//   exitedRules: Set<string>,
+//   category: string,
 //   questionLog: { [alias]: { category: string, question: string }[] },
+//   usedQuestions: Set<string>,   // ⟵ NEW: questions already asked this cycle
 //   lastRound: { playerName: string, question: string } | null,
-//   lastPlayer: string | null   // previously picked alias
+//   lastPlayer: string | null
 // }
 const gameState = {};
 
@@ -93,17 +92,25 @@ function saveSkippedQuestion(guildId, playerName, category, question) {
 }
 
 /**
- * Returns one unused question for (guildId, playerName, category), or null if none left.
+ * Returns one unused question for (guildId, category) globally,
+ * ensuring no repeats until the full pool is exhausted.
  */
-function getNextQuestion(guildId, playerName, category) {
+function getNextQuestion(guildId, category) {
   const all = customQuestions[category] || [];
-  const used =
-    gameState[guildId].questionLog[playerName]?.map(
-      (entry) => entry.question
-    ) || [];
-  const available = all.filter((q) => !used.includes(q));
-  if (available.length === 0) return null;
-  return available[Math.floor(Math.random() * available.length)];
+  const used = gameState[guildId].usedQuestions; // Set<string>
+  // Build list of available questions:
+  const available = all.filter((q) => !used.has(q));
+
+  if (available.length === 0) {
+    // All questions exhausted for this category
+    return null;
+  }
+  // Pick a random index from available
+  const idx = Math.floor(Math.random() * available.length);
+  const question = available[idx];
+  // Mark as used
+  used.add(question);
+  return question;
 }
 
 /**
@@ -310,9 +317,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
         exitedRules: new Set(),
         category: null,
         questionLog: {},
+        usedQuestions: new Set(), // ⟵ NEW: track globally used questions
         lastRound: null,
         lastPlayer: null,
       };
+      // Also clear any old player queue
+      resetLastPicked(guildId);
 
       // Ask for number of players
       const countEmbed = new EmbedBuilder()
@@ -395,6 +405,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       // If fewer than 2 remain, cancel game
       if (state.players.length < 2) {
         delete gameState[guildId];
+        resetLastPicked(guildId);
         return interaction.update({
           content: "❌ **Not enough players remain. Game canceled.**",
           embeds: [],
@@ -510,6 +521,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       // If fewer than 2 remain, cancel game
       if (state.players.length < 2) {
         delete gameState[guildId];
+        resetLastPicked(guildId);
         return interaction.update({
           content: "❌ **Not enough players remain. Game canceled.**",
           embeds: [],
@@ -520,10 +532,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
       // Move to playing stage
       state.step = "playing";
 
-      // First question sequence
+      // FIRST question: pick a truly random (shuffled‐cycle) player
       const chosenPlayer = pickRandomPlayer(guildId, state.players);
       state.lastPlayer = chosenPlayer;
-      const question = getNextQuestion(guildId, chosenPlayer, state.category);
+
+      // If category changed since last time, clear previous used questions
+      // (though normally usedQuestions was empty at start)
+      // We assume the same category remains until game end; no need to reset each question.
+
+      // Pick next question from the global pool for this category
+      const question = getNextQuestion(guildId, state.category);
       if (!question) {
         const outEmbed = new EmbedBuilder()
           .setColor(EMBED_COLOR)
@@ -568,6 +586,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const selectedCategory = interaction.customId; // "extreme_18", "18plus", "life", or "mix"
     state.category = selectedCategory;
     state.step = "warning";
+
+    // Reset usedQuestions for this new category (in case of "changecategory")
+    state.usedQuestions = new Set();
 
     // Show the Warning embed now that category is chosen
     const playersMention = state.playerIds.map((id) => `<@${id}>`).join(", ");
@@ -626,18 +647,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
     // Send that feedback first
     await interaction.reply({ embeds: [feedbackEmbed] });
 
-    // Now pick the next player & question
-    const selectedCategory = state.category;
+    // Now pick the next player & question using true shuffle‐cycle logic:
     const chosenPlayer = pickRandomPlayer(guildId, state.players);
     state.lastPlayer = chosenPlayer;
 
-    const question = getNextQuestion(guildId, chosenPlayer, selectedCategory);
+    // Pick next question from the global pool (per category)
+    const question = getNextQuestion(guildId, state.category);
     if (!question) {
       const doneEmbed = new EmbedBuilder()
         .setColor(EMBED_COLOR)
         .setTitle("✅ **ALL QUESTIONS COMPLETED**")
         .setDescription(
-          `All questions in **${selectedCategory
+          `All questions in **${state.category
             .replace("_", " ")
             .toUpperCase()}** have been exhausted.`
         );
@@ -645,7 +666,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return interaction.followUp({ embeds: [doneEmbed] });
     }
 
-    saveAnsweredQuestion(guildId, chosenPlayer, selectedCategory, question);
+    saveAnsweredQuestion(guildId, chosenPlayer, state.category, question);
     state.lastRound = { playerName: chosenPlayer, question: question };
 
     const questionEmbed = new EmbedBuilder()
@@ -710,28 +731,23 @@ client.on(Events.InteractionCreate, async (interaction) => {
     state.step === "awaiting_continue" &&
     interaction.customId === "continue_game"
   ) {
-    const selectedCategory = state.category;
     const chosenPlayer = pickRandomPlayer(guildId, state.players);
     state.lastPlayer = chosenPlayer;
 
-    const nextQuestion = getNextQuestion(
-      guildId,
-      chosenPlayer,
-      selectedCategory
-    );
+    const nextQuestion = getNextQuestion(guildId, chosenPlayer, state.category);
     if (!nextQuestion) {
       const noMoreEmbed = new EmbedBuilder()
         .setColor(EMBED_COLOR)
         .setTitle("❌ **ALL QUESTIONS GONE**")
         .setDescription(
-          `All questions in **${selectedCategory
+          `All questions in **${state.category
             .replace("_", " ")
             .toUpperCase()}** are exhausted.`
         );
       return interaction.reply({ embeds: [noMoreEmbed] });
     }
 
-    saveAnsweredQuestion(guildId, chosenPlayer, selectedCategory, nextQuestion);
+    saveAnsweredQuestion(guildId, chosenPlayer, state.category, nextQuestion);
     state.lastRound = {
       playerName: chosenPlayer,
       question: nextQuestion,
@@ -774,6 +790,7 @@ client.on(Events.MessageCreate, async (msg) => {
       );
     }
     delete gameState[guildId];
+    resetLastPicked(guildId);
     return msg.channel.send(
       "🛑 **The game session has been ended. Thanks for playing!**"
     );
@@ -867,6 +884,10 @@ client.on(Events.MessageCreate, async (msg) => {
     state.step === "playing"
   ) {
     state.step = "choose_category";
+
+    // Reset usedQuestions as category will change
+    state.usedQuestions = new Set();
+    resetLastPicked(guildId);
 
     const embed = new EmbedBuilder()
       .setColor(EMBED_COLOR)
