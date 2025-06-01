@@ -103,6 +103,12 @@ function saveSkippedQuestion(guildId, playerName, category, question) {
  * ensuring no repeats until the full pool is exhausted.
  */
 function getNextQuestion(guildId, category) {
+  if (!guildId || !category || !customQuestions[category]) {
+    console.warn(
+      `[getNextQuestion] Invalid call — guildId: ${guildId}, category: ${category}`
+    );
+    return null;
+  }
   const all = customQuestions[category] || [];
   const used = gameState[guildId].usedQuestions; // Set<string>
   // Build list of available questions:
@@ -741,7 +747,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const chosenPlayer = pickRandomPlayer(guildId, state.players);
     state.lastPlayer = chosenPlayer;
 
-    const nextQuestion = getNextQuestion(guildId, chosenPlayer, state.category);
+    const nextQuestion = getNextQuestion(guildId,state.category);
     if (!nextQuestion) {
       const noMoreEmbed = new EmbedBuilder()
         .setColor(EMBED_COLOR)
