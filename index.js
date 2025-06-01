@@ -127,8 +127,6 @@ function createContinueButton() {
 
 /**
  * Builds Next/Skip buttons for the ongoing round.
- * We also spread out the “Change Category” option via chat keyword,
- * so it no longer needs its own button.
  */
 function createNextSkipButtons() {
   return new ActionRowBuilder().addComponents(
@@ -147,6 +145,27 @@ function createNextSkipButtons() {
 client.on(Events.InteractionCreate, async (interaction) => {
   const guildId = interaction.guild.id;
   const state = gameState[guildId];
+
+  // ─── NEW “NO-STATE” BUTTON GUARD ────────────────────────────
+  // If someone clicks a game button (#1) after typing "end" or (#2) before any /startgame, we give a polite reply.
+  if (interaction.isButton()) {
+    const validCustomIds = [
+      "extreme_18",
+      "18plus",
+      "life",
+      "next_question",
+      "skip_question",
+      "continue_game",
+    ];
+    if (validCustomIds.includes(interaction.customId) && !state) {
+      return interaction.reply({
+        content:
+          "❌ There is no active game currently. Start a new game with `/startgame`.",
+        ephemeral: true,
+      });
+    }
+  }
+  // ─── “NO-STATE” GUARD END ───────────────────────────────────
 
   // ─── 1) Slash Command “/startgame” ─────────────────────────
   if (interaction.isChatInputCommand()) {
@@ -179,36 +198,39 @@ client.on(Events.InteractionCreate, async (interaction) => {
     state.category = selectedCategory;
     state.step = "playing";
 
-    // Pick a random player (avoid immediate repeats)
+    // Pick a random player (avoid repeats)
     const chosenPlayer = pickRandomPlayer(guildId, state.players);
     state.lastPlayer = chosenPlayer;
 
-    // Fetch a question for that player/category
+    // Get a question
     const question = getNextQuestion(guildId, chosenPlayer, selectedCategory);
     if (!question) {
       const outEmbed = new EmbedBuilder()
         .setColor(EMBED_COLOR)
-        .setTitle("✅ Done!")
+        .setTitle("✅ ALL QUESTIONS FINISHED")
         .setDescription(
           `All questions in **${selectedCategory
             .replace("_", " ")
-            .toUpperCase()}** have been exhausted.`
+            .toUpperCase()}** have been used.`
         );
-      await interaction.reply({ embeds: [outEmbed] });
-      return;
+      return interaction.reply({ embeds: [outEmbed] });
     }
 
     saveAnsweredQuestion(guildId, chosenPlayer, selectedCategory, question);
-    state.lastRound = {
-      playerName: chosenPlayer,
-      question: question,
-    };
+    state.lastRound = { playerName: chosenPlayer, question: question };
 
-    // Embed: “It’s X’s turn” + question
+    // Build a BIGGER EMBED: player name is the title; question is in a field:
     const questionEmbed = new EmbedBuilder()
       .setColor(EMBED_COLOR)
-      .setTitle(`🎲 ${chosenPlayer}'s Turn`)
-      .setDescription(`**Question:**\n> ${question}\n\n🎤 *Please respond...*`);
+      .setTitle(`🎲 ${chosenPlayer.toUpperCase()}'S TURN`)
+      .addFields([
+        {
+          name: "❓ QUESTION",
+          value: `**${question}**`,
+          inline: false,
+        },
+      ])
+      .setFooter({ text: "🎤 Please respond with your answer below." });
 
     await interaction.reply({
       embeds: [questionEmbed],
@@ -232,7 +254,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (!question) {
       const doneEmbed = new EmbedBuilder()
         .setColor(EMBED_COLOR)
-        .setTitle("✅ Done!")
+        .setTitle("✅ ALL QUESTIONS COMPLETED")
         .setDescription(
           `All questions in **${selectedCategory
             .replace("_", " ")
@@ -243,15 +265,19 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
 
     saveAnsweredQuestion(guildId, chosenPlayer, selectedCategory, question);
-    state.lastRound = {
-      playerName: chosenPlayer,
-      question: question,
-    };
+    state.lastRound = { playerName: chosenPlayer, question: question };
 
     const questionEmbed = new EmbedBuilder()
       .setColor(EMBED_COLOR)
-      .setTitle(`🎲 ${chosenPlayer}'s Turn`)
-      .setDescription(`**Question:**\n> ${question}\n\n🎤 *Please respond...*`);
+      .setTitle(`🎲 ${chosenPlayer.toUpperCase()}'S TURN`)
+      .addFields([
+        {
+          name: "❓ QUESTION",
+          value: `**${question}**`,
+          inline: false,
+        },
+      ])
+      .setFooter({ text: "🎤 Please respond with your answer below." });
 
     await interaction.reply({
       embeds: [questionEmbed],
@@ -285,8 +311,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
     // Embed: “You skipped—here’s your dare”
     const dareEmbed = new EmbedBuilder()
       .setColor(EMBED_COLOR)
-      .setTitle("⏭️ You Skipped!")
-      .setDescription(`**Dare for ${skipper}:**\n> ${dare}`);
+      .setTitle("⏭️ YOU SKIPPED!")
+      .addFields([
+        {
+          name: `🔥 DARE FOR ${skipper.toUpperCase()}`,
+          value: `**${dare}**`,
+          inline: false,
+        },
+      ])
+      .setFooter({ text: "▶️ Click Continue when you’re done." });
 
     await interaction.reply({
       embeds: [dareEmbed],
@@ -316,31 +349,31 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (!nextQuestion) {
       const noMoreEmbed = new EmbedBuilder()
         .setColor(EMBED_COLOR)
-        .setTitle("❌ No More Questions")
+        .setTitle("❌ ALL QUESTIONS GONE")
         .setDescription(
           `All questions in **${selectedCategory
             .replace("_", " ")
-            .toUpperCase()}** are gone.`
+            .toUpperCase()}** are exhausted.`
         );
       await interaction.reply({ embeds: [noMoreEmbed] });
       return;
     }
 
     saveAnsweredQuestion(guildId, chosenPlayer, selectedCategory, nextQuestion);
-    state.lastRound = {
-      playerName: chosenPlayer,
-      question: nextQuestion,
-    };
-
-    // Switch state back to “playing”
+    state.lastRound = { playerName: chosenPlayer, question: nextQuestion };
     state.step = "playing";
 
     const questionEmbed = new EmbedBuilder()
       .setColor(EMBED_COLOR)
-      .setTitle(`🎲 ${chosenPlayer}'s Turn`)
-      .setDescription(
-        `**Question:**\n> ${nextQuestion}\n\n🎤 *Please respond...*`
-      );
+      .setTitle(`🎲 ${chosenPlayer.toUpperCase()}'S TURN`)
+      .addFields([
+        {
+          name: "❓ QUESTION",
+          value: `**${nextQuestion}**`,
+          inline: false,
+        },
+      ])
+      .setFooter({ text: "🎤 Please respond with your answer below." });
 
     await interaction.reply({
       embeds: [questionEmbed],
@@ -350,13 +383,28 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 });
 
-// ─── Single MessageCreate Handler ─────────────────────────────
+// ─── Single MessageCreate Handler (with “end” keyword) ─────────────────────────
 client.on(Events.MessageCreate, async (msg) => {
   // 1. Ignore bots
   if (msg.author.bot) return;
 
   const guildId = msg.guild?.id;
   const state = gameState[guildId];
+
+  // 1.a) If user types "end", terminate the game session in this guild
+  if (msg.content.trim().toLowerCase() === "end") {
+    if (!state) {
+      // No active game to end
+      return msg.channel.send(
+        "❌ No active game session to end in this channel."
+      );
+    }
+    // Delete the in-memory state for this guild
+    delete gameState[guildId];
+    return msg.channel.send(
+      "🛑 The game session has been ended. Thanks for playing!"
+    );
+  }
 
   // 2. “changecategory” keyword—only valid if we’re in “playing”:
   if (
@@ -368,7 +416,7 @@ client.on(Events.MessageCreate, async (msg) => {
 
     const embed = new EmbedBuilder()
       .setColor(EMBED_COLOR)
-      .setTitle("🔄 Change Category")
+      .setTitle("🔄 CHANGE CATEGORY")
       .setDescription("You requested a new category! Please pick one below:");
 
     return msg.channel.send({
@@ -392,7 +440,7 @@ client.on(Events.MessageCreate, async (msg) => {
 
     const embed = new EmbedBuilder()
       .setColor(EMBED_COLOR)
-      .setTitle("✅ Players Count Set")
+      .setTitle("✅ PLAYERS COUNT SET")
       .setDescription(
         `You entered **${count}** players.\n\nNow, please enter all player names at once, separated by commas.\nExample: \`Alice,Bob,Charlie\`.`
       );
@@ -424,7 +472,7 @@ client.on(Events.MessageCreate, async (msg) => {
 
     const embed = new EmbedBuilder()
       .setColor(EMBED_COLOR)
-      .setTitle("✅ Players Registered")
+      .setTitle("✅ PLAYERS REGISTERED")
       .setDescription(
         `Players: ${names.join(", ")}\n\nNow pick a category to begin:`
       );
